@@ -12,11 +12,26 @@ const resetButton = document.getElementById("resetButton");
 
 // MARK: - Data
 const patterns = [
-  "Just tell me what you're told.",
-  "I have to go to the station now.",
-  "Practice makes perfect every time.",
-  "Actions speak louder than words.",
-  "The early bird catches the worm."
+  {
+    fullText: "Just tell me what you're told.",
+    chunks: ["Just tell me", "what you're told"]
+  },
+  {
+    fullText: "I have to go to the station now.",
+    chunks: ["I have to go", "to the station", "now"]
+  },
+  {
+    fullText: "Practice makes perfect every time.",
+    chunks: ["Practice makes perfect", "every time"]
+  },
+  {
+    fullText: "Actions speak louder than words.",
+    chunks: ["Actions speak", "louder than words"]
+  },
+  {
+    fullText: "The early bird catches the worm.",
+    chunks: ["The early bird", "catches the worm"]
+  }
 ];
 
 const commandMap = {
@@ -36,9 +51,9 @@ let mode = "command";
 let shouldResumeRecognitionAfterSpeech = false;
 let isSpeaking = false;
 
-targetTextEl.textContent = patterns[currentIndex];
+// MARK: - Setup
+updateTarget();
 
-// MARK: - Recognition Setup
 const SpeechRecognition =
   window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -107,6 +122,10 @@ if (!SpeechRecognition) {
 }
 
 // MARK: - Helpers
+function currentPattern() {
+  return patterns[currentIndex];
+}
+
 function normalizeText(text) {
   return text
     .toLowerCase()
@@ -191,7 +210,7 @@ function speakText(text, lang = "en-US", rate = 0.9) {
 }
 
 function updateTarget() {
-  targetTextEl.textContent = patterns[currentIndex];
+  targetTextEl.textContent = currentPattern().fullText;
 }
 
 function moveNextPattern() {
@@ -201,34 +220,43 @@ function moveNextPattern() {
 }
 
 async function playCurrentPattern() {
-  const target = patterns[currentIndex];
-  await speakText(target, "en-US", 0.85);
+  await speakText(currentPattern().fullText, "en-US", 0.85);
   statusEl.textContent = "Say a command: backward, have a go, next, reset";
 }
 
-async function playBackwardPattern() {
-  const target = patterns[currentIndex];
-  const clean = target.replace(/[.?!]/g, "");
-  const words = clean.split(" ");
+function buildBackwardSequences(chunks) {
   const sequences = [];
 
-  for (let i = words.length - 1; i >= 0; i--) {
-    sequences.push(words.slice(i).join(" "));
+  for (let i = chunks.length - 1; i >= 0; i--) {
+    sequences.push(chunks.slice(i).join(" / "));
   }
 
-  statusEl.textContent = "Backward mode...";
+  return sequences;
+}
 
-  for (const chunk of sequences) {
-    transcriptEl.textContent = chunk;
-    await speakText(chunk, "en-US", 0.78);
+async function playBackwardPattern() {
+  const sequences = buildBackwardSequences(currentPattern().chunks);
+
+  statusEl.textContent = "Backward chunk mode...";
+
+  for (const sequence of sequences) {
+    transcriptEl.textContent = sequence;
+    await speakText(sequence.replaceAll(" / ", ", "), "en-US", 0.78);
   }
 
   statusEl.textContent = "Backward finished. Say: have a go, next, reset";
 }
 
+async function playChunkSequenceForward() {
+  for (const chunk of currentPattern().chunks) {
+    transcriptEl.textContent = chunk;
+    await speakText(chunk, "en-US", 0.82);
+  }
+}
+
 async function startPracticeMode() {
   mode = "practice";
-  statusEl.textContent = "Practice mode. Repeat the target sentence.";
+  statusEl.textContent = "Practice mode. Repeat the full target sentence.";
   await speakText("Have a go.", "en-US", 0.92);
 }
 
@@ -237,9 +265,20 @@ function returnToCommandMode() {
   statusEl.textContent = "Back to command mode.";
 }
 
+function calculateWordScore(spokenText, targetText) {
+  const spokenWords = normalizeText(spokenText).split(" ");
+  const targetWords = normalizeText(targetText).split(" ");
+
+  const matchedCount = targetWords.filter((word) =>
+    spokenWords.includes(word)
+  ).length;
+
+  return matchedCount / targetWords.length;
+}
+
 async function checkPractice(spokenText) {
   const spoken = normalizeText(spokenText);
-  const target = normalizeText(patterns[currentIndex]);
+  const target = normalizeText(currentPattern().fullText);
 
   if (spoken === target) {
     count += 1;
@@ -249,12 +288,7 @@ async function checkPractice(spokenText) {
     return;
   }
 
-  const targetWords = target.split(" ");
-  const spokenWords = spoken.split(" ");
-  const matchedCount = targetWords.filter((word) =>
-    spokenWords.includes(word)
-  ).length;
-  const score = matchedCount / targetWords.length;
+  const score = calculateWordScore(spokenText, currentPattern().fullText);
 
   if (score >= 0.7) {
     count += 1;
