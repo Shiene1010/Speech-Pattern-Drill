@@ -20,11 +20,11 @@ const patterns = [
 ];
 
 const commandMap = {
-  start: ["스타트", "시작", "start"],
-  backward: ["백워드", "backward"],
-  practice: ["해버고", "연습", "practice"],
-  next: ["다음", "next"],
-  reset: ["초기화", "리셋", "reset"]
+  start: ["start"],
+  backward: ["backward"],
+  practice: ["have a go"],
+  next: ["next"],
+  reset: ["reset"]
 };
 
 // MARK: - State
@@ -32,43 +32,55 @@ let count = 0;
 let currentIndex = 0;
 let recognition = null;
 let isListening = false;
-let mode = "command"; // command | practice
-let lastFinalTranscript = "";
+let mode = "command";
+let shouldResumeRecognitionAfterSpeech = false;
+let isSpeaking = false;
 
 targetTextEl.textContent = patterns[currentIndex];
 
-// MARK: - Speech Recognition Setup
+// MARK: - Recognition Setup
 const SpeechRecognition =
   window.SpeechRecognition || window.webkitSpeechRecognition;
 
 if (!SpeechRecognition) {
-  statusEl.textContent = "이 브라우저는 SpeechRecognition을 지원하지 않습니다. Chrome을 사용하세요.";
+  statusEl.textContent =
+    "This browser does not support SpeechRecognition. Please use Chrome.";
 } else {
   recognition = new SpeechRecognition();
-  recognition.lang = "ko-KR";
+  recognition.lang = "en-US";
   recognition.continuous = true;
   recognition.interimResults = true;
+  recognition.maxAlternatives = 1;
 
   recognition.onstart = () => {
     isListening = true;
-    listenButton.textContent = "듣기 중지";
-    statusEl.textContent = mode === "command"
-      ? "명령어를 듣는 중..."
-      : "연습 발화를 듣는 중...";
+    listenButton.textContent = "Stop Listening";
+    statusEl.textContent =
+      mode === "command"
+        ? "Listening for English commands..."
+        : "Listening for your practice sentence...";
   };
 
   recognition.onend = () => {
     isListening = false;
-    listenButton.textContent = "듣기 시작";
-    if (mode === "command") {
-      statusEl.textContent = "대기 중 - '스타트' 또는 '백워드'라고 말해보세요.";
-    } else {
-      statusEl.textContent = "대기 중 - 연습 모드";
+    listenButton.textContent = "Start Listening";
+
+    if (isSpeaking) return;
+
+    if (shouldResumeRecognitionAfterSpeech) {
+      shouldResumeRecognitionAfterSpeech = false;
+      safeStartRecognition();
+      return;
     }
+
+    statusEl.textContent =
+      mode === "command"
+        ? "Idle - say: start, backward, have a go, next, reset"
+        : "Practice mode - say the target sentence.";
   };
 
   recognition.onerror = (event) => {
-    statusEl.textContent = `오류: ${event.error}`;
+    statusEl.textContent = `Recognition error: ${event.error}`;
   };
 
   recognition.onresult = (event) => {
@@ -89,8 +101,7 @@ if (!SpeechRecognition) {
     transcriptEl.textContent = (finalText || interimText).trim();
 
     if (finalText.trim()) {
-      lastFinalTranscript = finalText.trim();
-      handleRecognizedText(lastFinalTranscript);
+      handleRecognizedText(finalText.trim());
     }
   };
 }
@@ -99,25 +110,84 @@ if (!SpeechRecognition) {
 function normalizeText(text) {
   return text
     .toLowerCase()
-    .replace(/[^\w\s가-힣']/g, "")
+    .replace(/[^\w\s']/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 function containsCommand(text, commandKey) {
   const normalized = normalizeText(text);
-  return commandMap[commandKey].some(cmd => normalized.includes(normalizeText(cmd)));
+  return commandMap[commandKey].some((cmd) =>
+    normalized.includes(normalizeText(cmd))
+  );
+}
+
+function safeStartRecognition() {
+  if (!recognition || isListening || isSpeaking) return;
+
+  try {
+    recognition.start();
+  } catch (error) {
+    console.warn("recognition.start skipped:", error);
+  }
+}
+
+function safeStopRecognition() {
+  if (!recognition || !isListening) return;
+
+  try {
+    recognition.stop();
+  } catch (error) {
+    console.warn("recognition.stop skipped:", error);
+  }
 }
 
 function speakText(text, lang = "en-US", rate = 0.9) {
-  window.speechSynthesis.cancel();
+  return new Promise((resolve) => {
+    window.speechSynthesis.cancel();
 
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = lang;
-  utterance.rate = rate;
-  utterance.pitch = 1.0;
+    if (isListening) {
+      shouldResumeRecognitionAfterSpeech = true;
+      safeStopRecognition();
+    }
 
-  window.speechSynthesis.speak(utterance);
+    isSpeaking = true;
+    statusEl.textContent = `Speaking: ${text}`;
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = lang;
+    utterance.rate = rate;
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+
+    utterance.onend = () => {
+      isSpeaking = false;
+
+      if (shouldResumeRecognitionAfterSpeech) {
+        shouldResumeRecognitionAfterSpeech = false;
+        setTimeout(() => {
+          safeStartRecognition();
+        }, 250);
+      }
+
+      resolve();
+    };
+
+    utterance.onerror = () => {
+      isSpeaking = false;
+
+      if (shouldResumeRecognitionAfterSpeech) {
+        shouldResumeRecognitionAfterSpeech = false;
+        setTimeout(() => {
+          safeStartRecognition();
+        }, 250);
+      }
+
+      resolve();
+    };
+
+    window.speechSynthesis.speak(utterance);
+  });
 }
 
 function updateTarget() {
@@ -127,16 +197,16 @@ function updateTarget() {
 function moveNextPattern() {
   currentIndex = (currentIndex + 1) % patterns.length;
   updateTarget();
-  statusEl.textContent = "다음 패턴으로 이동했습니다.";
+  statusEl.textContent = "Moved to the next pattern.";
 }
 
-function playCurrentPattern() {
+async function playCurrentPattern() {
   const target = patterns[currentIndex];
-  statusEl.textContent = "타겟 표현을 읽는 중...";
-  speakText(target, "en-US", 0.85);
+  await speakText(target, "en-US", 0.85);
+  statusEl.textContent = "Say a command: backward, have a go, next, reset";
 }
 
-function playBackwardPattern() {
+async function playBackwardPattern() {
   const target = patterns[currentIndex];
   const clean = target.replace(/[.?!]/g, "");
   const words = clean.split(" ");
@@ -146,73 +216,73 @@ function playBackwardPattern() {
     sequences.push(words.slice(i).join(" "));
   }
 
-  statusEl.textContent = "백워드 모드 재생 중...";
+  statusEl.textContent = "Backward mode...";
 
-  window.speechSynthesis.cancel();
+  for (const chunk of sequences) {
+    transcriptEl.textContent = chunk;
+    await speakText(chunk, "en-US", 0.78);
+  }
 
-  sequences.forEach((chunk, index) => {
-    setTimeout(() => {
-      transcriptEl.textContent = chunk;
-      speakText(chunk, "en-US", 0.8);
-    }, index * 1800);
-  });
+  statusEl.textContent = "Backward finished. Say: have a go, next, reset";
 }
 
-function startPracticeMode() {
+async function startPracticeMode() {
   mode = "practice";
-  statusEl.textContent = "연습 모드입니다. 타겟 표현을 따라 말해보세요.";
-  speakText("Repeat after me.", "en-US", 0.9);
+  statusEl.textContent = "Practice mode. Repeat the target sentence.";
+  await speakText("Have a go.", "en-US", 0.92);
 }
 
 function returnToCommandMode() {
   mode = "command";
-  statusEl.textContent = "명령 모드로 돌아왔습니다.";
+  statusEl.textContent = "Back to command mode.";
 }
 
-function checkPractice(spokenText) {
+async function checkPractice(spokenText) {
   const spoken = normalizeText(spokenText);
   const target = normalizeText(patterns[currentIndex]);
 
   if (spoken === target) {
     count += 1;
     countValueEl.textContent = String(count);
-    statusEl.textContent = "정확히 일치했습니다. 카운트 증가.";
-    speakText("Good job.", "en-US", 0.95);
+    await speakText("Good job.", "en-US", 0.95);
     returnToCommandMode();
     return;
   }
 
   const targetWords = target.split(" ");
   const spokenWords = spoken.split(" ");
-  const matchedCount = targetWords.filter(word => spokenWords.includes(word)).length;
+  const matchedCount = targetWords.filter((word) =>
+    spokenWords.includes(word)
+  ).length;
   const score = matchedCount / targetWords.length;
 
   if (score >= 0.7) {
     count += 1;
     countValueEl.textContent = String(count);
-    statusEl.textContent = `부분 일치 성공 (${Math.round(score * 100)}%). 카운트 증가.`;
-    speakText("Good. Try again.", "en-US", 0.95);
+    await speakText("Good. Try again.", "en-US", 0.95);
     returnToCommandMode();
   } else {
-    statusEl.textContent = `불일치 (${Math.round(score * 100)}%). 다시 해보세요.`;
-    speakText("Try again.", "en-US", 0.95);
+    await speakText("Try again.", "en-US", 0.95);
+    statusEl.textContent = `Not matched enough (${Math.round(score * 100)}%). Repeat the sentence.`;
   }
 }
 
-function handleRecognizedText(text) {
+async function handleRecognizedText(text) {
+  if (isSpeaking) return;
+
   if (mode === "command") {
     if (containsCommand(text, "start")) {
-      playCurrentPattern();
+      await playCurrentPattern();
       return;
     }
 
     if (containsCommand(text, "backward")) {
-      playBackwardPattern();
+      await playBackwardPattern();
       return;
     }
 
     if (containsCommand(text, "practice")) {
-      startPracticeMode();
+      await startPracticeMode();
       return;
     }
 
@@ -226,12 +296,12 @@ function handleRecognizedText(text) {
       return;
     }
 
-    statusEl.textContent = `알 수 없는 명령: ${text}`;
+    statusEl.textContent = `Unknown command: ${text}`;
     return;
   }
 
   if (mode === "practice") {
-    checkPractice(text);
+    await checkPractice(text);
   }
 }
 
@@ -240,10 +310,10 @@ function resetAll() {
   currentIndex = 0;
   mode = "command";
   countValueEl.textContent = "0";
-  transcriptEl.textContent = "여기에 음성 인식 결과가 표시됩니다.";
+  transcriptEl.textContent = "Your speech recognition result will appear here.";
   updateTarget();
-  statusEl.textContent = "초기화되었습니다.";
   window.speechSynthesis.cancel();
+  statusEl.textContent = "Reset complete.";
 }
 
 // MARK: - Button Actions
@@ -251,22 +321,22 @@ listenButton.addEventListener("click", () => {
   if (!recognition) return;
 
   if (isListening) {
-    recognition.stop();
+    safeStopRecognition();
   } else {
-    recognition.start();
+    safeStartRecognition();
   }
 });
 
-speakButton.addEventListener("click", () => {
-  playCurrentPattern();
+speakButton.addEventListener("click", async () => {
+  await playCurrentPattern();
 });
 
-backwardButton.addEventListener("click", () => {
-  playBackwardPattern();
+backwardButton.addEventListener("click", async () => {
+  await playBackwardPattern();
 });
 
-practiceButton.addEventListener("click", () => {
-  startPracticeMode();
+practiceButton.addEventListener("click", async () => {
+  await startPracticeMode();
 });
 
 resetButton.addEventListener("click", () => {
