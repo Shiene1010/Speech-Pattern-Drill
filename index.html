@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Speech Pattern Drill</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <main class="app">
+    <h1>Speech Pattern Drill</h1>
+
+    <section class="panel">
+      <h2>상태</h2>
+      <p id="status">준비됨</p>
+    </section>
+
+    <section class="panel">
+      <h2>타겟 표현</h2>
+      <p id="targetText">Just tell me what you're told.</p>
+    </section>
+
+    <section class="panel">
+      <h2>인식 결과</h2>
+      <p id="transcript">여기에 음성 인식 결과가 표시됩니다.</p>
+    </section>
+
+    <section class="panel counter-panel">
+      <h2>카운트</h2>
+      <p id="countValue">0</p>
+    </section>
+
+    <section class="controls">
+      <button id="listenButton">듣기 시작</button>
+      <button id="speakButton">타겟 읽기</button>
+      <button id="backwardButton">백워드</button>
+      <button id="practiceButton">해버고</button>
+      <button id="resetButton">초기화</button>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>
